@@ -3,6 +3,7 @@
   "name": "AutoPROMO agent",
   "version": "1.0.0",
   "description": "Headless automation suite. Features: Auto-DM, Auto-React, Auto-Join, Scraper, and Keyword Listener.",
+  "homepage_url": "https://autopromo.xyz",
   "action": {
     "default_popup": "index.html",
     "default_title": "Open AutoPROMO"

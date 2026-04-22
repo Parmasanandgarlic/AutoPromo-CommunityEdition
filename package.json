@@ -4,6 +4,11 @@
   "version": "1.0.0",
   "description": "AutoPROMO Agent - Advanced Automation Suite",
   "author": "AutoPROMO Team",
+  "homepage": "https://autopromo.xyz",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Parmasanandgarlic/AutoPromo-CommunityEdition.git"
+  },
   "type": "module",
   "main": "electron-main.js",
   "scripts": {

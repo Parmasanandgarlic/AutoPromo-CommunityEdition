@@ -1,5 +1,6 @@
 {
   "name": "AutoPROMO agent",
   "description": "Headless automation suite for Telegram and Twitter.",
+  "homepage": "https://autopromo.xyz",
   "requestFramePermissions": []
 }

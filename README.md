@@ -59,6 +59,10 @@ Edit the `.env` file to configure:
 - AI provider API keys (OpenAI, Anthropic, or Google Gemini)
 - Rate limits and scraping settings
 
+## Website
+
+For more information, updates, and premium features, visit [autopromo.xyz](https://autopromo.xyz)
+
 ## License
 
 This project is open-source and available under the MIT License.
