@@ -1,0 +1,16 @@
+{
+  "name": "AutoPROMO agent",
+  "short_name": "AutoPROMO",
+  "description": "Headless automation suite for Telegram and Twitter.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#06140f",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "128x128",
+      "type": "image/png"
+    }
+  ]
+}

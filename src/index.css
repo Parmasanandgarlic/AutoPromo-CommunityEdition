@@ -1,0 +1,101 @@
+@import url('https://fonts.googleapis.com/css2?family=Indie+Flower&family=Inter:wght@400;500;700;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-handwriting: "Indie Flower", cursive;
+  --font-sans: "Inter", sans-serif;
+  --animate-spin-slow: spin 3s linear infinite;
+}
+
+@layer utilities {
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+}
+
+.crt::before {
+  content: " ";
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.02), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.02));
+  z-index: 2;
+  background-size: 100% 2px, 3px 100%;
+  pointer-events: none;
+}
+
+.crt {
+  animation: textShadow 1.6s infinite;
+}
+
+@keyframes textShadow {
+  0% {
+    text-shadow: 0.4389924193300864px 0 1px rgba(0,30,255,0.15), -0.4389924193300864px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  5% {
+    text-shadow: 2.7928974010788217px 0 1px rgba(0,30,255,0.15), -2.7928974010788217px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  10% {
+    text-shadow: 0.02956275843481219px 0 1px rgba(0,30,255,0.15), -0.02956275843481219px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  15% {
+    text-shadow: 0.40218538552878136px 0 1px rgba(0,30,255,0.15), -0.40218538552878136px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  20% {
+    text-shadow: 3.4794037899852017px 0 1px rgba(0,30,255,0.15), -3.4794037899852017px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  25% {
+    text-shadow: 1.6125630401149584px 0 1px rgba(0,30,255,0.15), -1.6125630401149584px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  30% {
+    text-shadow: 0.7015590085143956px 0 1px rgba(0,30,255,0.15), -0.7015590085143956px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  35% {
+    text-shadow: 3.896914047650351px 0 1px rgba(0,30,255,0.15), -3.896914047650351px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  40% {
+    text-shadow: 3.870905614848819px 0 1px rgba(0,30,255,0.15), -3.870905614848819px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  45% {
+    text-shadow: 2.231056963361899px 0 1px rgba(0,30,255,0.15), -2.231056963361899px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  50% {
+    text-shadow: 0.08084290417898504px 0 1px rgba(0,30,255,0.15), -0.08084290417898504px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  55% {
+    text-shadow: 2.3758461067427543px 0 1px rgba(0,30,255,0.15), -2.3758461067427543px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  60% {
+    text-shadow: 2.202193051050636px 0 1px rgba(0,30,255,0.15), -2.202193051050636px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  65% {
+    text-shadow: 2.8638780614874975px 0 1px rgba(0,30,255,0.15), -2.8638780614874975px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  70% {
+    text-shadow: 0.48874025155497314px 0 1px rgba(0,30,255,0.15), -0.48874025155497314px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  75% {
+    text-shadow: 1.8948491305757957px 0 1px rgba(0,30,255,0.15), -1.8948491305757957px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  80% {
+    text-shadow: 0.0833037308038857px 0 1px rgba(0,30,255,0.15), -0.0833037308038857px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  85% {
+    text-shadow: 0.09769827255241735px 0 1px rgba(0,30,255,0.15), -0.09769827255241735px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  90% {
+    text-shadow: 3.443339761481782px 0 1px rgba(0,30,255,0.15), -3.443339761481782px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  95% {
+    text-shadow: 2.1841838852799786px 0 1px rgba(0,30,255,0.15), -2.1841838852799786px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+  100% {
+    text-shadow: 2.6208764473832513px 0 1px rgba(0,30,255,0.15), -2.6208764473832513px 0 1px rgba(255,0,80,0.1), 0 0 1px;
+  }
+}
