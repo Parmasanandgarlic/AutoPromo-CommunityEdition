@@ -14,10 +14,22 @@ jobs:
         with:
           node-version: 22.x
           cache: npm
-      - run: npm install --package-lock-only --ignore-scripts --no-audit
-      - continue-on-error: true
-        run: npm audit fix --package-lock-only --ignore-scripts
-      - run: npm ci
+      - name: Synchronize lockfile with desktop dependency changes
+        run: npm install --package-lock-only --ignore-scripts --no-audit
+      - name: Verify synchronized graph installs
+        run: npm ci
+      - name: Persist synchronized lockfile
+        shell: bash
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            echo 'Lockfile already synchronized.'
+          else
+            git config user.name 'security-lockfile-bot'
+            git config user.email 'security-lockfile-bot@users.noreply.github.com'
+            git add package-lock.json
+            git commit -m 'security: synchronize desktop dependency lockfile'
+            git push origin HEAD:agent/portfolio-security-audit
+          fi
       - run: npm run lint
       - run: npm run test
       - run: npm run build
@@ -25,12 +37,3 @@ jobs:
       - run: npm run build:electron
       - name: Reject high/critical advisories across desktop and production graph
         run: npm audit --audit-level=high
-      - name: Commit verified lockfile only
-        shell: bash
-        run: |
-          if git diff --quiet -- package-lock.json; then exit 0; fi
-          git config user.name 'security-lockfile-bot'
-          git config user.email 'security-lockfile-bot@users.noreply.github.com'
-          git add package-lock.json
-          git commit -m 'security: refresh patched desktop dependency lockfile'
-          git push origin HEAD:agent/portfolio-security-audit
