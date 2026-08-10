@@ -1,0 +1,43 @@
+name: Security Lockfile Refresh
+on:
+  push:
+    branches: [agent/portfolio-security-audit]
+permissions:
+  contents: write
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: agent/portfolio-security-audit}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - name: Synchronize lockfile with reduced runtime graph
+        run: npm install --package-lock-only --ignore-scripts --no-audit
+      - name: Apply non-breaking advisory fixes
+        continue-on-error: true
+        run: npm audit fix --package-lock-only --ignore-scripts
+      - name: Verify exact graph installs
+        run: npm ci
+      - name: Verify TypeScript and bundles
+        run: |
+          npm run lint
+          npm run build
+          npm run build:server
+          npm run build:electron
+      - name: Persist validated lockfile
+        shell: bash
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            echo 'Lockfile already synchronized.'
+          else
+            git config user.name 'security-lockfile-bot'
+            git config user.email 'security-lockfile-bot@users.noreply.github.com'
+            git add package-lock.json
+            git commit -m 'security: refresh reduced runtime dependency lockfile'
+            git push origin HEAD:agent/portfolio-security-audit
+          fi
+      - name: Report remaining production blockers
+        run: npm audit --omit=dev --audit-level=high
