@@ -39,7 +39,6 @@
       "dist/**/*",
       "electron-main.js",
       "server.js",
-      "agent_db.json",
       "package.json"
     ],
     "win": {
