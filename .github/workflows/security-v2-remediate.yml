@@ -1,0 +1,140 @@
+name: Security V2 Remediation
+on:
+  push:
+    branches: [agent/security-v2-audit]
+permissions:
+  contents: write
+jobs:
+  remediate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: agent/security-v2-audit
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.x'
+          cache: npm
+      - name: Harden local API and renderer secret persistence
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/compiler/index.ts')
+          s = p.read_text()
+          old_cors = '''  const allowedOrigins = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'https://autopromo.xyz',
+    'https://www.autopromo.xyz'
+  ];
+
+  app.use(cors(function (req, callback) {
+    const origin = req.header('origin');
+    if (!origin) return callback(null, { origin: true, credentials: true });
+
+    const host = req.get('x-forwarded-host') || req.get('host');
+    if (origin === `http://${host}` || origin === `https://${host}`) {
+      return callback(null, { origin: true, credentials: true });
+    }
+
+    if (origin.endsWith('.run.app')) {
+      return callback(null, { origin: true, credentials: true });
+    }
+
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      return callback(null, { origin: true, credentials: true });
+    }
+
+    return callback(new Error('CORS Policy Rejected Request'), { origin: false });
+  }));
+'''
+          new_cors = '''  const allowedOrigins = new Set([
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+  ]);
+
+  app.disable('x-powered-by');
+  app.use(cors(function (req, callback) {
+    const origin = req.header('origin');
+    // Native/local non-browser clients may omit Origin. Browser callers must
+    // originate from the loopback UI served by this process.
+    if (!origin) return callback(null, { origin: false, credentials: false });
+    if (allowedOrigins.has(origin)) {
+      return callback(null, { origin: true, credentials: false });
+    }
+    return callback(new Error('CORS Policy Rejected Request'), { origin: false });
+  }));
+'''
+          if old_cors not in s:
+            raise SystemExit('expected CORS block not found')
+          s = s.replace(old_cors, new_cors, 1)
+
+          s = s.replace('''      const session = await sessionManager.createSession(name, apiId, apiHash, phoneNumber);
+      res.json(session);''', '''      const session = await sessionManager.createSession(name, apiId, apiHash, phoneNumber);
+      res.json({ id: session.id, name: session.name, status: session.status, created_at: session.created_at });''', 1)
+          s = s.replace('''      const session = await sessionManager.verifySession(Number(id), phoneCode, password);
+      res.json(session);''', '''      const session = await sessionManager.verifySession(Number(id), phoneCode, password);
+      res.json({ id: session.id, name: session.name, status: session.status, created_at: session.created_at, is_authenticated: true });''', 1)
+          s = s.replace('''      const account = await db.addTwitterAccount(name, authToken, ct0);
+      res.json(account);''', '''      const account = await db.addTwitterAccount(name, authToken, ct0);
+      res.json({ id: account.id, name: account.name, status: account.status, created_at: account.created_at });''', 1)
+          s = s.replace('''      const scheduledAction = await db.addScheduledTwitterAction(account, target, action, scheduledAt, content, proxy, rateLimitResets, userAgentConfig, aiConfig);
+      res.json(scheduledAction);''', '''      const scheduledAction = await db.addScheduledTwitterAction(account, target, action, scheduledAt, content, proxy, rateLimitResets, userAgentConfig, aiConfig);
+      res.json({ id: scheduledAction.id, account: scheduledAction.account, target: scheduledAction.target, action: scheduledAction.action, scheduled_at: scheduledAction.scheduled_at, status: scheduledAction.status });''', 1)
+          s = s.replace('app.listen(PORT, "0.0.0.0", () => {', 'app.listen(PORT, "127.0.0.1", () => {', 1)
+          p.write_text(s)
+
+          app = Path('src/tool/App.tsx')
+          a = app.read_text()
+          old_init = '''  const [advancedConfig, setAdvancedConfig] = useState(() => {
+    const saved = localStorage.getItem('advancedConfig');
+    const parsed = saved ? JSON.parse(saved) : {};
+    return {'''
+          new_init = '''  const [advancedConfig, setAdvancedConfig] = useState(() => {
+    const saved = localStorage.getItem('advancedConfig');
+    const parsed = saved ? JSON.parse(saved) : {};
+    // Never restore secrets from browser storage. Older releases may have
+    // persisted these fields, so explicitly discard them on load.
+    delete parsed.proxyPass;
+    delete parsed.twitterProxyPass;
+    delete parsed.aiApiKey;
+    return {'''
+          if old_init not in a:
+            raise SystemExit('advancedConfig initializer not found')
+          a = a.replace(old_init, new_init, 1)
+          old_save = "  useEffect(() => { localStorage.setItem('advancedConfig', JSON.stringify(advancedConfig)); }, [advancedConfig]);"
+          new_save = '''  useEffect(() => {
+    const { proxyPass: _proxyPass, twitterProxyPass: _twitterProxyPass, aiApiKey: _aiApiKey, ...persistable } = advancedConfig;
+    localStorage.setItem('advancedConfig', JSON.stringify(persistable));
+  }, [advancedConfig]);'''
+          if old_save not in a:
+            raise SystemExit('advancedConfig persistence effect not found')
+          a = a.replace(old_save, new_save, 1)
+          app.write_text(a)
+
+          # Empty generated/stale runtime artifact should not be source-controlled.
+          Path('server.js').unlink(missing_ok=True)
+          PY
+      - name: Validate exact graph and application
+        run: |
+          npm ci
+          npm run lint
+          npm test -- --runInBand || npm test
+          npm run build
+          npm audit --omit=dev --audit-level=high
+          npm audit --audit-level=critical
+      - name: Persist only validated remediation
+        shell: bash
+        run: |
+          git config user.name 'security-remediation-bot'
+          git config user.email 'security-remediation-bot@users.noreply.github.com'
+          git add -A src/compiler/index.ts src/tool/App.tsx server.js
+          if git diff --cached --quiet; then
+            echo 'No remediation changes.'
+            exit 0
+          fi
+          git commit -m 'security: harden Community local control plane and secret storage'
+          git push origin HEAD:agent/security-v2-audit
