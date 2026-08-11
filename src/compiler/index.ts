@@ -14,34 +14,59 @@ import { twitterAutomation } from "../agent/twitter.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+const LOOPBACK_ORIGINS = new Set([
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://[::1]:3000',
+]);
+const SECRET_RESPONSE_KEYS = new Set([
+  'apikey', 'api_key', 'apihash', 'api_hash', 'authtoken', 'auth_token', 'ct0',
+  'password', 'pass', 'proxypass', 'proxy_pass', 'privatekey', 'private_key',
+  'sessionstring', 'session_string', 'clientsecret', 'client_secret',
+  'encryptionkey', 'encryption_key',
+]);
+
+function sanitizeForRenderer(value: any): any {
+  if (Array.isArray(value)) return value.map(sanitizeForRenderer);
+  if (!value || typeof value !== 'object') return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    const normalized = key.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    if (SECRET_RESPONSE_KEYS.has(normalized)) continue;
+    out[key] = sanitizeForRenderer(child);
+  }
+  return out;
+}
+
 export async function bootstrap() {
   const app = express();
   const PORT = 3000;
 
-  const allowedOrigins = [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'https://autopromo.xyz',
-    'https://www.autopromo.xyz'
-  ];
+  app.disable('x-powered-by');
+
+  // Loopback APIs are still vulnerable to DNS rebinding if Host is trusted blindly.
+  // Refuse requests whose Host does not resolve to an explicit local UI hostname.
+  app.use((req, res, next) => {
+    const hostname = req.hostname?.toLowerCase();
+    if (!hostname || !LOOPBACK_HOSTS.has(hostname)) {
+      return res.status(403).json({ error: 'Local control plane only.' });
+    }
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
 
   app.use(cors(function (req, callback) {
     const origin = req.header('origin');
-    if (!origin) return callback(null, { origin: true, credentials: true });
-
-    const host = req.get('x-forwarded-host') || req.get('host');
-    if (origin === `http://${host}` || origin === `https://${host}`) {
-      return callback(null, { origin: true, credentials: true });
+    // Native/local non-browser clients may omit Origin. Browser callers must be
+    // the loopback UI served by this process. Cookies are not part of this API.
+    if (!origin) return callback(null, { origin: false, credentials: false });
+    if (LOOPBACK_ORIGINS.has(origin)) {
+      return callback(null, { origin: true, credentials: false });
     }
-
-    if (origin.endsWith('.run.app')) {
-      return callback(null, { origin: true, credentials: true });
-    }
-
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      return callback(null, { origin: true, credentials: true });
-    }
-
     return callback(new Error('CORS Policy Rejected Request'), { origin: false });
   }));
 
@@ -50,15 +75,17 @@ export async function bootstrap() {
   const globalApiLimiter = rateLimit({
     windowMs: 5 * 60 * 1000,
     max: 100,
+    standardHeaders: true,
+    legacyHeaders: false,
     message: { error: "Global API limit exceeded. Too many requests." }
   });
   app.use('/api/', globalApiLimiter);
 
-  app.get("/api/health", (req, res) => {
+  app.get("/api/health", (_req, res) => {
     res.json({ status: "ok" });
   });
 
-  app.get("/api/sessions", async (req, res) => {
+  app.get("/api/sessions", async (_req, res) => {
     const sessions = await db.getSessions();
     const safeSessions = sessions.map(s => ({
       id: s.id,
@@ -75,7 +102,7 @@ export async function bootstrap() {
     const { name, apiId, apiHash, phoneNumber } = req.body;
     try {
       const session = await sessionManager.createSession(name, apiId, apiHash, phoneNumber);
-      res.json(session);
+      res.json(sanitizeForRenderer({ id: session.id, name: session.name, status: session.status, created_at: session.created_at }));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -84,6 +111,8 @@ export async function bootstrap() {
   const sessionAuthLimiter = rateLimit({
     windowMs: 60 * 60 * 1000,
     max: 15,
+    standardHeaders: true,
+    legacyHeaders: false,
     message: { error: "Too many authentication tracking attempts."}
   });
 
@@ -92,7 +121,7 @@ export async function bootstrap() {
     const { phoneCode, password } = req.body;
     try {
       const session = await sessionManager.verifySession(Number(id), phoneCode, password);
-      res.json(session);
+      res.json(sanitizeForRenderer({ id: session.id, name: session.name, status: session.status, created_at: session.created_at, is_authenticated: true }));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -108,9 +137,8 @@ export async function bootstrap() {
     }
   });
 
-  app.get("/api/keywords", async (req, res) => {
-    const keywords = await db.getKeywords();
-    res.json(keywords);
+  app.get("/api/keywords", async (_req, res) => {
+    res.json(await db.getKeywords());
   });
 
   app.post("/api/keywords", async (req, res) => {
@@ -124,18 +152,16 @@ export async function bootstrap() {
   });
 
   app.delete("/api/keywords/:id", async (req, res) => {
-    const { id } = req.params;
     try {
-      await db.deleteKeyword(Number(id));
+      await db.deleteKeyword(Number(req.params.id));
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  app.get("/api/groups", async (req, res) => {
-    const groups = await db.getGroups();
-    res.json(groups);
+  app.get("/api/groups", async (_req, res) => {
+    res.json(await db.getGroups());
   });
 
   app.post("/api/groups", async (req, res) => {
@@ -149,23 +175,20 @@ export async function bootstrap() {
   });
 
   app.delete("/api/groups/:id", async (req, res) => {
-    const { id } = req.params;
     try {
-      await db.deleteGroup(Number(id));
+      await db.deleteGroup(Number(req.params.id));
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  app.get("/api/users", async (req, res) => {
-    const users = await db.getScrapedUsers();
-    res.json(users);
+  app.get("/api/users", async (_req, res) => {
+    res.json(sanitizeForRenderer(await db.getScrapedUsers()));
   });
 
-  app.get("/api/logs", async (req, res) => {
-    const logs = await db.getLogs();
-    res.json(logs);
+  app.get("/api/logs", async (_req, res) => {
+    res.json(sanitizeForRenderer(await db.getLogs()));
   });
 
   app.post("/api/actions/scrape", async (req, res) => {
@@ -179,16 +202,15 @@ export async function bootstrap() {
   });
 
   app.post("/api/actions/start-listener", async (req, res) => {
-    const { sessionId } = req.body;
     try {
-      await listener.start(sessionId);
+      await listener.start(req.body.sessionId);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  app.post("/api/actions/stop-listener", async (req, res) => {
+  app.post("/api/actions/stop-listener", async (_req, res) => {
     try {
       await listener.stop();
       res.json({ success: true });
@@ -207,7 +229,7 @@ export async function bootstrap() {
     }
   });
 
-  app.post("/api/actions/stop-operator", async (req, res) => {
+  app.post("/api/actions/stop-operator", async (_req, res) => {
     try {
       await operator.stop();
       res.json({ success: true });
@@ -231,10 +253,7 @@ export async function bootstrap() {
     try {
       const accounts = await db.getTwitterAccounts();
       const accountData = accounts.find(a => a.name === account);
-      if (!accountData) {
-        throw new Error(`Twitter account ${account} not found in database.`);
-      }
-
+      if (!accountData) throw new Error(`Twitter account ${account} not found in database.`);
       const result = await twitterAutomation.executeAction(
         account,
         target,
@@ -246,36 +265,33 @@ export async function bootstrap() {
         userAgentConfig,
         aiConfig
       );
-      res.json(result);
+      res.json(sanitizeForRenderer(result));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  app.get("/api/twitter/status", async (req, res) => {
+  app.get("/api/twitter/status", async (_req, res) => {
     try {
-      const accounts = await db.getTwitterAccounts();
       const statuses: Record<string, any> = {};
-      for (const account of accounts) {
+      for (const account of await db.getTwitterAccounts()) {
         statuses[account.name] = twitterAutomation.getAccountStatus(account.name);
       }
-      res.json(statuses);
+      res.json(sanitizeForRenderer(statuses));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
   app.get("/api/twitter/status/:account", async (req, res) => {
-    const { account } = req.params;
     try {
-      const status = twitterAutomation.getAccountStatus(account);
-      res.json(status);
+      res.json(sanitizeForRenderer(twitterAutomation.getAccountStatus(req.params.account)));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  app.get("/api/twitter/accounts", async (req, res) => {
+  app.get("/api/twitter/accounts", async (_req, res) => {
     const accounts = await db.getTwitterAccounts();
     res.json(accounts.map(a => ({ id: a.id, name: a.name, status: a.status, created_at: a.created_at })));
   });
@@ -284,49 +300,38 @@ export async function bootstrap() {
     const { name, authToken, ct0 } = req.body;
     try {
       const account = await db.addTwitterAccount(name, authToken, ct0);
-      res.json(account);
+      res.json(sanitizeForRenderer({ id: account.id, name: account.name, status: account.status, created_at: account.created_at }));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
   app.delete("/api/twitter/accounts/:id", async (req, res) => {
-    const { id } = req.params;
     try {
-      await db.deleteTwitterAccount(Number(id));
+      await db.deleteTwitterAccount(Number(req.params.id));
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  app.get("/api/twitter/scheduled", async (req, res) => {
-    const actions = await db.getScheduledTwitterActions();
-    const safeActions = actions.map(a => {
-      const safeAction = { ...a };
-      if (safeAction.aiConfig && safeAction.aiConfig.apiKey) {
-        const key = safeAction.aiConfig.apiKey;
-        safeAction.aiConfig.apiKey = key.length > 8 ? `${key.substring(0, 4)}...${key.slice(-4)}` : '****';
-      }
-      return safeAction;
-    });
-    res.json(safeActions);
+  app.get("/api/twitter/scheduled", async (_req, res) => {
+    res.json(sanitizeForRenderer(await db.getScheduledTwitterActions()));
   });
 
   app.post("/api/twitter/scheduled", async (req, res) => {
     const { account, target, action, scheduledAt, content, proxy, rateLimitResets, userAgentConfig, aiConfig } = req.body;
     try {
       const scheduledAction = await db.addScheduledTwitterAction(account, target, action, scheduledAt, content, proxy, rateLimitResets, userAgentConfig, aiConfig);
-      res.json(scheduledAction);
+      res.json(sanitizeForRenderer(scheduledAction));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
   app.delete("/api/twitter/scheduled/:id", async (req, res) => {
-    const { id } = req.params;
     try {
-      await db.deleteScheduledTwitterAction(Number(id));
+      await db.deleteScheduledTwitterAction(Number(req.params.id));
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -343,17 +348,24 @@ export async function bootstrap() {
   } else {
     const distPath = path.join(__dirname, '../../dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
   await db.init();
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server (Compiler Layer) running on http://localhost:${PORT}`);
+  app.listen(PORT, "127.0.0.1", () => {
+    console.log(`Server (Compiler Layer) running on http://127.0.0.1:${PORT}`);
 
     sessionManager.init().catch(e => console.error('Failed to init session manager:', e));
+
+    // Background action execution is opt-in. A fresh install must not silently
+    // begin social actions simply because persisted schedules exist.
+    if (process.env.SOCIAL_AUTOMATION_ENABLED !== 'true') {
+      console.warn('Background social automation disabled; set SOCIAL_AUTOMATION_ENABLED=true to enable scheduled actions.');
+      return;
+    }
 
     setInterval(async () => {
       try {
@@ -362,9 +374,7 @@ export async function bootstrap() {
           try {
             const accounts = await db.getTwitterAccounts();
             const accountData = accounts.find(a => a.name === action.account);
-            if (!accountData) {
-              throw new Error(`Twitter account ${action.account} not found.`);
-            }
+            if (!accountData) throw new Error(`Twitter account ${action.account} not found.`);
 
             await twitterAutomation.executeAction(
               action.account,
