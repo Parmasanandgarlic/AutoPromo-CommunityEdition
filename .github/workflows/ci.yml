@@ -6,38 +6,70 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: "Phase 1 & 2: Unit & Integration Tests"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
+          node-version: '22.x'
+          cache: npm
       - run: npm ci
-      - run: npm run test
+      - name: Run Vitest when suites exist
+        run: npm run test -- --passWithNoTests
+      - name: TypeScript gate
+        run: npm run lint
+      - name: Production build gate
+        run: npm run build
+      - name: Server bundle gate
+        run: npm run build:server
+      - name: Electron main-process bundle gate
+        run: npm run build:electron
+
+  dependency-security:
+    name: "Production Dependency Security"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+      - run: npm ci
+      - name: Reject high-severity production dependency advisories
+        run: npm audit --omit=dev --audit-level=high
 
   e2e:
     name: "Phase 3: E2E Playwright Tests"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps
-      - run: npm run test:e2e
+      - name: Run browser tests when suites exist
+        run: npm run test:e2e -- --pass-with-no-tests
 
   sast:
     name: "Phase 1: Static Application Security Testing (SAST)"
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v3
-      - name: Run CodeQL Analysis
-        uses: github/codeql-action/init@v2
+      - uses: actions/checkout@v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
         with:
-          languages: javascript
-      - uses: github/codeql-action/analyze@v2
+          languages: javascript-typescript
+      - name: Analyze with CodeQL
+        uses: github/codeql-action/analyze@v4
