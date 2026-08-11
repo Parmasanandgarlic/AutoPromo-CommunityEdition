@@ -9,4 +9,4 @@ permissions:
 
 jobs:
   audit:
-    uses: Parmasanandgarlic/awesome-agent-skills/.github/workflows/reusable-portfolio-security-audit.yml@b81424a2bef0e978a3b72106467ebfa5a3ce730a
+    uses: Parmasanandgarlic/awesome-agent-skills/.github/workflows/reusable-portfolio-security-audit.yml@912637c5829bb689f108d3a68532fa64e0c3c091
