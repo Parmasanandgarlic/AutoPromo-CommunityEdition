@@ -14,12 +14,13 @@ import { twitterAutomation } from "../agent/twitter.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
-const LOOPBACK_ORIGINS = new Set([
+const BIND_HOST = '127.0.0.1';
+const LOCAL_ORIGINS = new Set([
   'http://localhost:3000',
   'http://127.0.0.1:3000',
   'http://[::1]:3000',
 ]);
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 const SECRET_RESPONSE_KEYS = new Set([
   'apikey', 'api_key', 'apihash', 'api_hash', 'authtoken', 'auth_token', 'ct0',
   'password', 'pass', 'proxypass', 'proxy_pass', 'privatekey', 'private_key',
@@ -39,32 +40,68 @@ function sanitizeForRenderer(value: any): any {
   return out;
 }
 
+function safeSession(session: any) {
+  return {
+    id: session.id,
+    name: session.name,
+    phone_number: session.phone_number
+      ? `${String(session.phone_number).substring(0, 4)}****${String(session.phone_number).slice(-2)}`
+      : 'hidden',
+    status: session.status,
+    created_at: session.created_at,
+    is_authenticated: !!session.session_string,
+  };
+}
+
+function safeTwitterAccount(account: any) {
+  return {
+    id: account.id,
+    name: account.name,
+    status: account.status,
+    created_at: account.created_at,
+  };
+}
+
+function safeScheduledAction(action: any) {
+  const safeAction: any = sanitizeForRenderer(action);
+  if (action?.aiConfig) {
+    const { apiKey: _apiKey, ...safeAiConfig } = action.aiConfig;
+    safeAction.aiConfig = {
+      ...sanitizeForRenderer(safeAiConfig),
+      apiKeyConfigured: Boolean(_apiKey),
+    };
+  }
+  if (action?.proxy) {
+    const { pass: _pass, ...safeProxy } = action.proxy;
+    safeAction.proxy = {
+      ...sanitizeForRenderer(safeProxy),
+      passwordConfigured: Boolean(_pass),
+    };
+  }
+  return safeAction;
+}
+
+function isLoopbackAddress(value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.replace(/^::ffff:/, '');
+  return normalized === '127.0.0.1' || normalized === '::1';
+}
+
 export async function bootstrap() {
   const app = express();
   const PORT = 3000;
 
+  // This process can trigger privileged Telegram/Twitter automation and may
+  // hold account credentials. Community Edition is a loopback desktop control
+  // plane; a remotely reachable deployment requires a separate authenticated
+  // multi-user architecture.
+  app.set('trust proxy', false);
   app.disable('x-powered-by');
 
-  // Loopback APIs are still vulnerable to DNS rebinding if Host is trusted blindly.
-  // Refuse requests whose Host does not resolve to an explicit local UI hostname.
-  app.use((req, res, next) => {
-    const hostname = req.hostname?.toLowerCase();
-    if (!hostname || !LOOPBACK_HOSTS.has(hostname)) {
-      return res.status(403).json({ error: 'Local control plane only.' });
-    }
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Referrer-Policy', 'no-referrer');
-    if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
-    next();
-  });
-
-  app.use(cors(function (req, callback) {
+  app.use(cors((req, callback) => {
     const origin = req.header('origin');
-    // Native/local non-browser clients may omit Origin. Browser callers must be
-    // the loopback UI served by this process. Cookies are not part of this API.
     if (!origin) return callback(null, { origin: false, credentials: false });
-    if (LOOPBACK_ORIGINS.has(origin)) {
+    if (LOCAL_ORIGINS.has(origin)) {
       return callback(null, { origin: true, credentials: false });
     }
     return callback(new Error('CORS Policy Rejected Request'), { origin: false });
@@ -72,37 +109,48 @@ export async function bootstrap() {
 
   app.use(express.json({ limit: '100kb' }));
 
+  // CORS is not an authorization primitive. Independently require loopback
+  // transport, an explicit local Host, and non-cross-site browser context.
+  app.use('/api/', (req, res, next) => {
+    const hostname = req.hostname?.toLowerCase();
+    if (!isLoopbackAddress(req.socket.remoteAddress) || !hostname || !LOOPBACK_HOSTS.has(hostname)) {
+      return res.status(403).json({ error: 'Local API access only.' });
+    }
+    const origin = req.header('origin');
+    if (origin && !LOCAL_ORIGINS.has(origin)) {
+      return res.status(403).json({ error: 'Cross-origin API access denied.' });
+    }
+    if (req.header('sec-fetch-site') === 'cross-site') {
+      return res.status(403).json({ error: 'Cross-site API access denied.' });
+    }
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
+
   const globalApiLimiter = rateLimit({
     windowMs: 5 * 60 * 1000,
     max: 100,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: "Global API limit exceeded. Too many requests." }
+    message: { error: "Global API limit exceeded. Too many requests." },
   });
   app.use('/api/', globalApiLimiter);
 
-  app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok" });
-  });
+  app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
 
   app.get("/api/sessions", async (_req, res) => {
     const sessions = await db.getSessions();
-    const safeSessions = sessions.map(s => ({
-      id: s.id,
-      name: s.name,
-      phone_number: s.phone_number ? s.phone_number.substring(0, 4) + '****' + s.phone_number.slice(-2) : 'hidden',
-      status: s.status,
-      created_at: s.created_at,
-      is_authenticated: !!s.session_string
-    }));
-    res.json(safeSessions);
+    res.json(sessions.map(safeSession));
   });
 
   app.post("/api/sessions", async (req, res) => {
     const { name, apiId, apiHash, phoneNumber } = req.body;
     try {
       const session = await sessionManager.createSession(name, apiId, apiHash, phoneNumber);
-      res.json(sanitizeForRenderer({ id: session.id, name: session.name, status: session.status, created_at: session.created_at }));
+      res.json(safeSession(session));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -113,44 +161,37 @@ export async function bootstrap() {
     max: 15,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: "Too many authentication tracking attempts."}
+    message: { error: "Too many authentication tracking attempts." },
   });
 
   app.post("/api/sessions/:id/verify", sessionAuthLimiter, async (req, res) => {
-    const { id } = req.params;
     const { phoneCode, password } = req.body;
     try {
-      const session = await sessionManager.verifySession(Number(id), phoneCode, password);
-      res.json(sanitizeForRenderer({ id: session.id, name: session.name, status: session.status, created_at: session.created_at, is_authenticated: true }));
+      const session = await sessionManager.verifySession(Number(req.params.id), phoneCode, password);
+      res.json(safeSession(session));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
   app.delete("/api/sessions/:id", async (req, res) => {
-    const { id } = req.params;
     try {
-      await sessionManager.deleteSession(Number(id));
+      await sessionManager.deleteSession(Number(req.params.id));
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  app.get("/api/keywords", async (_req, res) => {
-    res.json(await db.getKeywords());
-  });
-
+  app.get("/api/keywords", async (_req, res) => res.json(await db.getKeywords()));
   app.post("/api/keywords", async (req, res) => {
-    const { keyword } = req.body;
     try {
-      await db.addKeyword(keyword);
+      await db.addKeyword(req.body.keyword);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
-
   app.delete("/api/keywords/:id", async (req, res) => {
     try {
       await db.deleteKeyword(Number(req.params.id));
@@ -160,20 +201,15 @@ export async function bootstrap() {
     }
   });
 
-  app.get("/api/groups", async (_req, res) => {
-    res.json(await db.getGroups());
-  });
-
+  app.get("/api/groups", async (_req, res) => res.json(await db.getGroups()));
   app.post("/api/groups", async (req, res) => {
-    const { groupId, name } = req.body;
     try {
-      await db.addGroup(groupId, name);
+      await db.addGroup(req.body.groupId, req.body.name);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
-
   app.delete("/api/groups/:id", async (req, res) => {
     try {
       await db.deleteGroup(Number(req.params.id));
@@ -186,21 +222,18 @@ export async function bootstrap() {
   app.get("/api/users", async (_req, res) => {
     res.json(sanitizeForRenderer(await db.getScrapedUsers()));
   });
-
   app.get("/api/logs", async (_req, res) => {
     res.json(sanitizeForRenderer(await db.getLogs()));
   });
 
   app.post("/api/actions/scrape", async (req, res) => {
-    const { sessionId, groupId } = req.body;
     try {
-      await scraper.scrapeGroup(sessionId, groupId);
+      await scraper.scrapeGroup(req.body.sessionId, req.body.groupId);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
-
   app.post("/api/actions/start-listener", async (req, res) => {
     try {
       await listener.start(req.body.sessionId);
@@ -209,7 +242,6 @@ export async function bootstrap() {
       res.status(500).json({ error: e.message });
     }
   });
-
   app.post("/api/actions/stop-listener", async (_req, res) => {
     try {
       await listener.stop();
@@ -218,17 +250,14 @@ export async function bootstrap() {
       res.status(500).json({ error: e.message });
     }
   });
-
   app.post("/api/actions/start-operator", async (req, res) => {
-    const { sessionId, template, maxPerDay } = req.body;
     try {
-      await operator.start(sessionId, template, maxPerDay);
+      await operator.start(req.body.sessionId, req.body.template, req.body.maxPerDay);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
-
   app.post("/api/actions/stop-operator", async (_req, res) => {
     try {
       await operator.stop();
@@ -237,11 +266,9 @@ export async function bootstrap() {
       res.status(500).json({ error: e.message });
     }
   });
-
   app.post("/api/actions/engage", async (req, res) => {
-    const { sessionId, target, action, emoji } = req.body;
     try {
-      await engagement.engage(sessionId, target, action, emoji);
+      await engagement.engage(req.body.sessionId, req.body.target, req.body.action, req.body.emoji);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -263,7 +290,7 @@ export async function bootstrap() {
         proxy,
         rateLimitResets,
         userAgentConfig,
-        aiConfig
+        aiConfig,
       );
       res.json(sanitizeForRenderer(result));
     } catch (e: any) {
@@ -282,7 +309,6 @@ export async function bootstrap() {
       res.status(500).json({ error: e.message });
     }
   });
-
   app.get("/api/twitter/status/:account", async (req, res) => {
     try {
       res.json(sanitizeForRenderer(twitterAutomation.getAccountStatus(req.params.account)));
@@ -293,19 +319,16 @@ export async function bootstrap() {
 
   app.get("/api/twitter/accounts", async (_req, res) => {
     const accounts = await db.getTwitterAccounts();
-    res.json(accounts.map(a => ({ id: a.id, name: a.name, status: a.status, created_at: a.created_at })));
+    res.json(accounts.map(safeTwitterAccount));
   });
-
   app.post("/api/twitter/accounts", async (req, res) => {
-    const { name, authToken, ct0 } = req.body;
     try {
-      const account = await db.addTwitterAccount(name, authToken, ct0);
-      res.json(sanitizeForRenderer({ id: account.id, name: account.name, status: account.status, created_at: account.created_at }));
+      const account = await db.addTwitterAccount(req.body.name, req.body.authToken, req.body.ct0);
+      res.json(safeTwitterAccount(account));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
-
   app.delete("/api/twitter/accounts/:id", async (req, res) => {
     try {
       await db.deleteTwitterAccount(Number(req.params.id));
@@ -316,19 +339,20 @@ export async function bootstrap() {
   });
 
   app.get("/api/twitter/scheduled", async (_req, res) => {
-    res.json(sanitizeForRenderer(await db.getScheduledTwitterActions()));
+    const actions = await db.getScheduledTwitterActions();
+    res.json(actions.map(safeScheduledAction));
   });
-
   app.post("/api/twitter/scheduled", async (req, res) => {
     const { account, target, action, scheduledAt, content, proxy, rateLimitResets, userAgentConfig, aiConfig } = req.body;
     try {
-      const scheduledAction = await db.addScheduledTwitterAction(account, target, action, scheduledAt, content, proxy, rateLimitResets, userAgentConfig, aiConfig);
-      res.json(sanitizeForRenderer(scheduledAction));
+      const scheduledAction = await db.addScheduledTwitterAction(
+        account, target, action, scheduledAt, content, proxy, rateLimitResets, userAgentConfig, aiConfig,
+      );
+      res.json(safeScheduledAction(scheduledAction));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
-
   app.delete("/api/twitter/scheduled/:id", async (req, res) => {
     try {
       await db.deleteScheduledTwitterAction(Number(req.params.id));
@@ -340,28 +364,21 @@ export async function bootstrap() {
 
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(__dirname, '../../dist');
+    // server.js is emitted beside the packaged dist/ directory.
+    const distPath = path.join(__dirname, 'dist');
     app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
   }
 
   await db.init();
 
-  app.listen(PORT, "127.0.0.1", () => {
-    console.log(`Server (Compiler Layer) running on http://127.0.0.1:${PORT}`);
-
+  app.listen(PORT, BIND_HOST, () => {
+    console.log(`Server (Compiler Layer) running on http://${BIND_HOST}:${PORT}`);
     sessionManager.init().catch(e => console.error('Failed to init session manager:', e));
 
-    // Background action execution is opt-in. A fresh install must not silently
-    // begin social actions simply because persisted schedules exist.
     if (process.env.SOCIAL_AUTOMATION_ENABLED !== 'true') {
       console.warn('Background social automation disabled; set SOCIAL_AUTOMATION_ENABLED=true to enable scheduled actions.');
       return;
@@ -375,7 +392,6 @@ export async function bootstrap() {
             const accounts = await db.getTwitterAccounts();
             const accountData = accounts.find(a => a.name === action.account);
             if (!accountData) throw new Error(`Twitter account ${action.account} not found.`);
-
             await twitterAutomation.executeAction(
               action.account,
               action.target,
@@ -385,7 +401,7 @@ export async function bootstrap() {
               action.proxy,
               action.rateLimitResets,
               action.userAgentConfig,
-              action.aiConfig
+              action.aiConfig,
             );
             await db.updateScheduledTwitterActionStatus(action.id, 'completed');
           } catch (e: any) {
