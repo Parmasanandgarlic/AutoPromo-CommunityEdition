@@ -34,7 +34,7 @@ export default function App() {
   };
 
   const handleDownloadWindows = () => {
-    addToast('To run on Windows: 1. Export to ZIP (AI Studio menu) 2. Extract 3. Run "build_installer.bat" inside.', 'success');
+    addToast('To build the Windows app locally, install dependencies and run "npm run electron:build:win".', 'success');
   };
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [logs, setLogs] = useState<any[]>([]);
