@@ -1,8 +1,8 @@
 {
-  "name": "react-example",
+  "name": "autopromo-community-edition",
   "private": true,
   "version": "1.0.0",
-  "description": "AutoPROMO Agent - Advanced Automation Suite",
+  "description": "Local-first Electron automation workspace for Telegram outreach and X/Twitter engagement with pluggable AI, scheduling, rate controls, and a loopback-only control plane.",
   "author": "AutoPROMO Team",
   "homepage": "https://autopromo.xyz",
   "repository": {
@@ -39,7 +39,6 @@
       "dist/**/*",
       "electron-main.js",
       "server.js",
-      "agent_db.json",
       "package.json"
     ],
     "win": {
@@ -103,5 +102,8 @@
     "vite": "^6.2.0",
     "vitest": "^4.1.4",
     "wait-on": "^9.0.4"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

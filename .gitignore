@@ -12,7 +12,11 @@ firebase-applet-config.json
 agent_db.json
 agent_db.json.bak
 
-# Build and Electron Artifacts
+# Generated application bundles
+server.js
+electron-main.js
+
+# Build and Electron artifacts
 release/
 out/
 *-unpacked/
