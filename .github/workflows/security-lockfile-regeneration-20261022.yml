@@ -1,0 +1,52 @@
+name: Isolated 2026-10 npm security patch verification
+on:
+  push:
+    branches:
+      - security/20261022-npm-advisories
+permissions:
+  contents: write
+concurrency:
+  group: security-lockfile-autopromo-community
+  cancel-in-progress: false
+jobs:
+  regenerate-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Regenerate integrity-protected npm lockfile, no scripts
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Check patched versions
+        run: |
+          node <<'NODE'
+          const lock=require('./package-lock.json');
+          const floors={vite:[6,4,5],axios:[1,20,0],'follow-redirects':[1,16,1]};
+          for(const [name,floor] of Object.entries(floors)){
+            const found=Object.entries(lock.packages||{}).filter(([k])=>k==='node_modules/'+name||k.endsWith('/node_modules/'+name)).map(([,v])=>v.version);
+            if(!found.length)throw Error(name+' missing');
+            for(const v of found){const s=v.split('.').map(Number);if(s[0]<floor[0]||(s[0]===floor[0]&&(s[1]<floor[1]||(s[1]===floor[1]&&s[2]<floor[2]))))throw Error(name+'@'+v+' is below patched floor '+floor.join('.'));}
+            console.log(name+': '+found.join(', '));
+          }
+          NODE
+      - name: Install exact resolved dependencies, scripts disabled
+        run: npm ci --ignore-scripts --no-fund
+      - name: Typecheck
+        run: npm run lint
+      - name: Tests
+        run: npm run test
+      - name: Client and server builds
+        run: |
+          npm run build
+          npm run build:server
+      - name: Commit regenerated lockfile, remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/security-lockfile-regeneration-20261022.yml
+          git add package-lock.json
+          git commit -m "chore(security): lock verified npm dependency patches"
+          git push origin HEAD:security/20261022-npm-advisories
