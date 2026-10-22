@@ -29,11 +29,13 @@ class SessionManager {
     }
   }
 
-  async createSession(name: string, apiId: number, apiHash: string, phoneNumber: string) {
-    const session = await db.addSession(name, apiId, apiHash, phoneNumber);
+  async createSession(name: string, apiId: number | string, apiHash: string, phoneNumber: string) {
+    const numericApiId = Number(apiId);
+    if (!numericApiId || isNaN(numericApiId)) throw new Error("Invalid apiId: must be a valid number");
+    const session = await db.addSession(name, numericApiId, apiHash, phoneNumber);
     if (!session) throw new Error("Failed to create session in DB");
 
-    const client = new TelegramClient(new StringSession(""), apiId, apiHash, {
+    const client = new TelegramClient(new StringSession(""), numericApiId, apiHash, {
       connectionRetries: 5,
     });
 
@@ -41,7 +43,7 @@ class SessionManager {
 
     const result = await client.sendCode(
       {
-        apiId,
+        apiId: numericApiId,
         apiHash,
       },
       phoneNumber
@@ -50,7 +52,7 @@ class SessionManager {
     this.pendingClients.set(session.id, { client, phoneCodeHash: result.phoneCodeHash });
     
     // SECURITY FIX: Sweep orphaned MTProto pending sockets after 10 minutes to prevent RAM consumption DOSing.
-    setTimeout(async () => {
+    const sweepTimer = setTimeout(async () => {
         if (this.pendingClients.has(session.id)) {
             const pending = this.pendingClients.get(session.id);
             if (pending) {
@@ -60,6 +62,7 @@ class SessionManager {
             }
         }
     }, 10 * 60 * 1000);
+    sweepTimer.unref();
     
     return session;
   }

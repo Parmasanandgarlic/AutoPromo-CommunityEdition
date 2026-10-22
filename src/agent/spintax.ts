@@ -1,14 +1,17 @@
 export function parseSpintax(text: string): string {
-  const regex = /\{([^{}]*)\}/g;
-  let match;
+  if (!text || typeof text !== 'string') return '';
+  const regex = /\{([^{}]*)\}/;
   let result = text;
+  let iterations = 0;
+  const maxIterations = 200;
   
   // Handle nested spintax by repeatedly parsing until no more matches
-  while ((match = regex.exec(result)) !== null) {
+  while (iterations++ < maxIterations) {
+    const match = regex.exec(result);
+    if (!match) break;
     const options = match[1].split('|');
-    const replacement = options[Math.floor(Math.random() * options.length)];
-    result = result.replace(match[0], replacement);
-    regex.lastIndex = 0; // Reset regex index after replacement
+    const replacement = options[Math.floor(Math.random() * options.length)] ?? '';
+    result = result.slice(0, match.index) + replacement + result.slice(match.index + match[0].length);
   }
   
   return result;

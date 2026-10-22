@@ -41,6 +41,7 @@ function sanitizeForRenderer(value: any): any {
 }
 
 function safeSession(session: any) {
+  if (!session) return session;
   return {
     id: session.id,
     name: session.name,
@@ -54,6 +55,7 @@ function safeSession(session: any) {
 }
 
 function safeTwitterAccount(account: any) {
+  if (!account) return account;
   return {
     id: account.id,
     name: account.name,
@@ -84,7 +86,7 @@ function safeScheduledAction(action: any) {
 function isLoopbackAddress(value: string | undefined): boolean {
   if (!value) return false;
   const normalized = value.replace(/^::ffff:/, '');
-  return normalized === '127.0.0.1' || normalized === '::1';
+  return normalized === '127.0.0.1' || normalized.startsWith('127.') || normalized === '::1';
 }
 
 export async function bootstrap() {
@@ -384,7 +386,7 @@ export async function bootstrap() {
       return;
     }
 
-    setInterval(async () => {
+    const scheduledWorker = setInterval(async () => {
       try {
         const pendingActions = await db.getPendingScheduledTwitterActions();
         for (const action of pendingActions) {
@@ -413,5 +415,6 @@ export async function bootstrap() {
         console.error('Scheduled actions worker error:', e.message);
       }
     }, 60000);
+    scheduledWorker.unref();
   });
 }

@@ -132,7 +132,9 @@ class DB {
   }
 
   private async forceSave() {
-    await fs.writeFile(this.dbPath, JSON.stringify(this.data, null, 2));
+    const tempPath = `${this.dbPath}.tmp.${Date.now()}`;
+    await fs.writeFile(tempPath, JSON.stringify(this.data, null, 2), 'utf-8');
+    await fs.rename(tempPath, this.dbPath);
   }
 
   private async save() {
@@ -155,7 +157,7 @@ class DB {
   }
 
   private generateId(collection: any[]): number {
-    return collection.length > 0 ? Math.max(...collection.map(i => i.id)) + 1 : 1;
+    return collection.reduce((max, i) => (typeof i.id === 'number' && i.id > max ? i.id : max), 0) + 1;
   }
 
   // Sessions

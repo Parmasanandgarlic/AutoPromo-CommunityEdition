@@ -12,7 +12,8 @@ const DESKTOP_URL = 'http://127.0.0.1:3000/tool.html';
 const isAllowedNavigation = (raw: string) => {
   try {
     const url = new URL(raw);
-    return url.protocol === 'http:' && url.hostname === '127.0.0.1' && url.port === '3000';
+    const isLoopbackHost = url.hostname === '127.0.0.1' || url.hostname === 'localhost';
+    return url.protocol === 'http:' && isLoopbackHost && url.port === '3000';
   } catch {
     return false;
   }
